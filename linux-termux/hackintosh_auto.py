@@ -806,6 +806,8 @@ def main():
         info("Hardware read from %s" % args.report)
     elif not IS_TERMUX:
         hw = detect_linux()
+        if shutil.which("lspci") is None or shutil.which("lscpu") is None:
+            warn("lspci/lscpu not found, so some hardware cannot be detected. Install them with: sudo apt install pciutils usbutils util-linux")
         info("Hardware detected on this computer.")
     else:
         hw = None
