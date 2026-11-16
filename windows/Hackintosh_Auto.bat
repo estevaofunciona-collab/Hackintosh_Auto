@@ -94,6 +94,7 @@ $outDir = Join-Path $Desktop 'Hackintosh_Auto_Output'
 & $py @pyPre $pyFile --report $rep --out $outDir
 Write-Host ''
 Write-Host ('Output folder: ' + $outDir) -ForegroundColor Green
+if (Test-Path (Join-Path $outDir 'EFI')) { Start-Process explorer.exe -ArgumentList ('"' + $outDir + '"') }
 #PY_DATA
 #!/usr/bin/env python3
 """
