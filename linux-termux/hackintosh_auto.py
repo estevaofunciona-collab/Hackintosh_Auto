@@ -28,7 +28,14 @@ import zipfile
 
 VERSION = "0.2"
 IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "")
+IS_WINDOWS = os.name == "nt"
 USE_COLOR = sys.stdout.isatty() or os.environ.get("HA_COLOR") == "1"
+if IS_WINDOWS:
+    try:
+        os.system("")  # enables ANSI colours in the Windows 10+ console
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def _c(code, s):
@@ -665,10 +672,11 @@ def kext_entries(kxdir, v):
 
 def gen_serial(oc_dir, model):
     """Returns (serial, mlb, used_macserial)."""
-    exe = os.path.join(oc_dir, "Utilities", "macserial", "macserial.linux")
+    exe = os.path.join(oc_dir, "Utilities", "macserial", "macserial.exe" if IS_WINDOWS else "macserial.linux")
     if os.path.isfile(exe) and platform.machine() in ("x86_64", "AMD64"):
         try:
-            os.chmod(exe, 0o755)
+            if not IS_WINDOWS:
+                os.chmod(exe, 0o755)
             out = subprocess.run([exe, "--model", model, "--num", "1"], capture_output=True, text=True, timeout=30).stdout
             m = re.search(r"^\s*(\S+)\s*\|\s*(\S+)", out, re.M)
             if m:
@@ -780,12 +788,14 @@ def main():
     args = ap.parse_args()
 
     print()
-    print("Hackintosh_Auto v%s (experimental) - %s" % (VERSION, "Termux" if IS_TERMUX else "Linux"))
+    print("Hackintosh_Auto v%s (experimental) - %s" % (VERSION, "Termux" if IS_TERMUX else ("Windows" if IS_WINDOWS else "Linux")))
     print("Compatibility data is approximate. Read https://dortania.github.io/OpenCore-Install-Guide/ before installing.")
 
     # ---- output folder
     if args.out:
         out = args.out
+    elif IS_WINDOWS:
+        out = os.path.join(os.path.expanduser("~"), "Desktop", "Hackintosh_Auto_Output")
     elif IS_TERMUX:
         home = os.path.expanduser("~")
         if not os.path.isdir(os.path.join(home, "storage", "shared")):
@@ -804,13 +814,15 @@ def main():
     if args.report:
         hw = parse_report(args.report)
         info("Hardware read from %s" % args.report)
-    elif not IS_TERMUX:
+    elif not IS_TERMUX and not IS_WINDOWS:
         hw = detect_linux()
         if shutil.which("lspci") is None or shutil.which("lscpu") is None:
             warn("lspci/lscpu not found, so some hardware cannot be detected. Install them with: sudo apt install pciutils usbutils util-linux")
         info("Hardware detected on this computer.")
     else:
         hw = None
+        if IS_WINDOWS:
+            warn("No hardware report given. Run Hackintosh_Auto.bat (it reads this PC for you) or answer the questions below.")
     if hw is not None:
         show_hw(hw)
         if not yesno("\nIs this correct?", True):
@@ -956,11 +968,12 @@ def main():
     cfg_notes, (serial, mlb) = write_config(cfg_path, oc, efi, choice, hw, res, notebook, dual, ver, plan)
     ok("config.plist written (drivers, kext order, SSDTs, SMBIOS, quirks, OpenCanopy + mouse).")
 
-    # ---- ocvalidate (x86_64 Linux only)
-    oc_val = os.path.join(oc, "Utilities", "ocvalidate", "ocvalidate.linux")
+    # ---- ocvalidate (x86_64 Linux / Windows only)
+    oc_val = os.path.join(oc, "Utilities", "ocvalidate", "ocvalidate.exe" if IS_WINDOWS else "ocvalidate.linux")
     if os.path.isfile(oc_val) and platform.machine() in ("x86_64", "AMD64"):
         try:
-            os.chmod(oc_val, 0o755)
+            if not IS_WINDOWS:
+                os.chmod(oc_val, 0o755)
             r = subprocess.run([oc_val, cfg_path], capture_output=True, text=True, timeout=60)
             tail = (r.stdout + r.stderr).strip().splitlines()[-6:]
             info("ocvalidate:")

@@ -2,28 +2,28 @@
 
 Scripts that help you prepare an **OpenCore EFI folder** and the **macOS recovery image** for a Hackintosh.
 
-> **Status: experimental.** The **Linux / Termux** version (v0.2) is interactive: it asks desktop or notebook and dual boot, reads (or asks for) your hardware, checks compatibility, lets you choose the macOS version and the Mac model, then builds the EFI with the right kexts and a generated `config.plist`. The **Windows** `.bat` is still v0.1 (a generic base EFI); the same interactive flow is coming to it. None of this is guaranteed to boot your machine: use at your own risk and always keep a backup of any EFI that already works.
+> **Status: experimental.** The **Linux / Termux / Windows** version (v0.2) is interactive: it asks desktop or notebook and dual boot, reads (or asks for) your hardware, checks compatibility, lets you choose the macOS version and the Mac model, then builds the EFI with the right kexts and a generated `config.plist`. The **Windows** `.bat` (v0.2) now runs the same flow: it reads the hardware of the PC itself, asks desktop/notebook and dual boot, and builds the EFI. None of this is guaranteed to boot your machine: use at your own risk and always keep a backup of any EFI that already works.
 
 ## What it does
 
-| Step | Windows (v0.1) | Linux (v0.2) | Termux (v0.2) |
+| Step | Windows (v0.2) | Linux (v0.2) | Termux (v0.2) |
 |---|---|---|---|
-| Asks desktop / notebook and dual boot | not yet | yes | yes |
-| Gets your hardware | `read_hardware_pc.bat` writes a report | detects it automatically (`lscpu`, `lspci`, `lsusb`) | `--report hardware_report.txt`, or asks you (CPU, board, GPU, Ethernet, audio, Wi-Fi, Bluetooth) |
-| Compatibility check (CPU generation, GPU, and Wi-Fi + Bluetooth on notebooks) | no | yes | yes |
-| Lists the compatible macOS versions and lets you pick the **macOS** and the **Mac model (SMBIOS)** | no | yes | yes |
+| Asks desktop / notebook and dual boot | yes | yes | yes |
+| Gets your hardware | reads it itself (WMI), saves `hardware_report.txt` | detects it automatically (`lscpu`, `lspci`, `lsusb`) | `--report hardware_report.txt`, or asks you (CPU, board, GPU, Ethernet, audio, Wi-Fi, Bluetooth) |
+| Compatibility check (CPU generation, GPU, and Wi-Fi + Bluetooth on notebooks) | yes | yes | yes |
+| Lists the compatible macOS versions and lets you pick the **macOS** and the **Mac model (SMBIOS)** | yes | yes | yes |
 | Downloads the latest **OpenCore** | yes | yes | yes |
-| Picks and downloads the **kexts** for your hardware and writes them to `config.plist` in load order | generic set | yes | yes |
-| Writes `config.plist` (SMBIOS + serial, quirks, SSDTs, iGPU platform-id, boot-args) and runs `ocvalidate` | no | yes | yes (`ocvalidate` on x86_64 Linux only) |
+| Picks and downloads the **kexts** for your hardware and writes them to `config.plist` in load order | yes | yes | yes |
+| Writes `config.plist` (SMBIOS + serial, quirks, SSDTs, iGPU platform-id, boot-args) and runs `ocvalidate` | yes | yes | yes (`ocvalidate` on x86_64 Linux only) |
 | Enables the **OpenCanopy** graphical boot menu with mouse | yes | yes | yes |
-| Downloads the **macOS recovery** (`com.apple.recovery.boot`) for the macOS you chose | Ventura | yes | yes |
+| Downloads the **macOS recovery** (`com.apple.recovery.boot`) for the macOS you chose | yes | yes | yes |
 
 The output folder contains `EFI/`, `com.apple.recovery.boot/` and `BUILD_INFO.txt` (what was chosen and what is left to do). For a USB installer, copy **both** folders to the **root** of a FAT32 drive with a GUID partition map.
 
 ## What it does NOT do
 
 - It does **not** partition, format or write to any disk.
-- It does **not** guarantee a bootable EFI. The generated `config.plist` is a good starting point (Windows v0.1 still ships OpenCore's `Sample.plist` with few changes), but BIOS settings, ACPI patches, USB mapping, audio layout and iGPU/GPU details are hardware specific. The compatibility data in the script is approximate: read the Dortania guide.
+- It does **not** guarantee a bootable EFI. The generated `config.plist` is a good starting point but BIOS settings, ACPI patches, USB mapping, audio layout and iGPU/GPU details are hardware specific. The compatibility data in the script is approximate: read the Dortania guide.
 - AMD processors are detected but not built yet (they need extra kernel patches).
 - It does **not** apply the OpenCore Legacy Patcher root patch. Hardware that Apple no longer supports (for example NVIDIA Kepler GPUs) needs that step inside macOS, and it can break boot on macOS versions that the patcher version does not support.
 - It does **not** redistribute any Apple files: everything is downloaded from Apple/GitHub at run time.
@@ -31,11 +31,12 @@ The output folder contains `EFI/`, `com.apple.recovery.boot/` and `BUILD_INFO.tx
 ## Usage
 
 ### Windows
-1. Download `windows/Hackintosh_Auto.bat`.
-2. Double-click it. Python is needed for the recovery download (install it from python.org if missing).
-3. The result is created on your Desktop in `Hackintosh_Auto_Output`.
+1. Download `windows/Hackintosh_Auto.bat` (Windows 10 or 11).
+2. Double-click it. It reads your hardware (read-only), then asks: desktop or notebook, dual boot, which macOS and which Mac model. Plug your Bluetooth dongle in first so it is detected.
+3. If Python 3 is not installed it downloads a small portable copy (about 10 MB) by itself.
+4. The result is created on your Desktop in `Hackintosh_Auto_Output` (`EFI` + `com.apple.recovery.boot` + `BUILD_INFO.txt`). A copy of the hardware report is saved as `hardware_report.txt` on your Desktop.
 
-To see what hardware you have first, run `windows/read_hardware_pc.bat`. It is read-only and saves `hardware_report.txt` on your Desktop, with kext suggestions (Ethernet, Bluetooth, GPU notes).
+`windows/read_hardware_pc.bat` is still there if you only want the report (with kext suggestions).
 
 ### Linux
 ```bash
@@ -65,7 +66,7 @@ Output: `Hackintosh_Auto_Output` in your phone's shared storage. Copy it to a US
 
 ## After the EFI is built
 
-1. Read `BUILD_INFO.txt`: it lists what is left to do for your hardware. (Windows v0.1: keep only the Ethernet kext that matches your board and run ProperTree's OC Snapshot.)
+1. Read `BUILD_INFO.txt`: it lists what is left to do for your hardware.
 2. Replace placeholder serial numbers with ones from `macserial` / GenSMBIOS if the notes say so, and never publish them.
 3. Boot the USB drive, install macOS to a **separate** drive, then copy the EFI to the internal drive's EFI partition.
 4. Map your USB ports with USBToolBox (this creates `UTBMap.kext`).
@@ -83,7 +84,7 @@ In the BIOS, put OpenCore first in the boot order, and disable Fast Boot if the 
 
 ## Roadmap
 
-- Bring the interactive flow (menus, compatibility check, kext selection, `ocvalidate`) to the Windows `.bat`.
+- Test the Windows `.bat` on more machines (it is new and was written without a Windows test machine).
 - AMD CPU support, more Mac models, and a better Wi-Fi/Bluetooth chip database for notebooks.
 - Test reports from real hardware.
 
