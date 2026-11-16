@@ -277,7 +277,7 @@ def parse_cpu(s):
 def vendor_of(text, vid=""):
     t = text.lower()
     vid = vid.lower()
-    if vid == "8086" or re.search(r"intel", t):
+    if vid in ("8086", "8087") or re.search(r"intel", t):
         return "intel"
     if vid in ("14e4", "0a5c") or re.search(r"broadcom|bcm\d|dell wireless 15|dw1", t):
         return "broadcom"
@@ -288,6 +288,25 @@ def vendor_of(text, vid=""):
     if vid in ("14c3", "0e8d") or re.search(r"mediatek|ralink|mt7", t):
         return "mediatek"
     return "unknown"
+
+
+# USB Bluetooth VID:PID that need an exact answer (a vendor id alone is not enough).
+BT_USB_IDS = {
+    ("0a12", "0001"): "csr",        # CSR8510 A10 and its many clones ("V5.0" dongles)
+    ("0b05", "17cb"): "broadcom",   # ASUS USB-BT400 (BCM20702)
+    ("050d", "065a"): "broadcom",   # Belkin F8T065 (BCM20702)
+    ("0930", "021e"): "broadcom",   # Toshiba BCM20702
+    ("0a5c", "21e8"): "broadcom",   # generic BCM20702A1 dongle
+}
+
+
+def bt_vendor(d):
+    vid, did = d.get("vid", "").lower(), d.get("did", "").lower()
+    if (vid, did) in BT_USB_IDS:
+        return BT_USB_IDS[(vid, did)]
+    if vid == "0a12" or re.search(r"\bcsr\b|csr8510", d.get("name", ""), re.I):
+        return "csr"
+    return vendor_of(d["name"], vid)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -581,7 +600,11 @@ BT_NOTE = {
     "realtek": ("NO", "Realtek Bluetooth does not work on macOS. Use an Intel/Broadcom USB dongle."),
     "atheros": ("NO", "Qualcomm/Atheros Bluetooth does not work reliably on macOS. Use an Intel/Broadcom USB dongle."),
     "mediatek": ("NO", "MediaTek Bluetooth does not work on macOS. Use an Intel/Broadcom USB dongle."),
-    "unknown": ("?", "Bluetooth chip not recognised (CSR and generic dongles usually do not work)."),
+    "csr": ("?", "CSR8510 dongle (0a12:0001, often sold as 'Bluetooth V5.0'): there is no driver for macOS 12+. The EFI gets "
+                 "BlueToolFixup + the Bluetooth NVRAM keys so you can try it (some people get it working on Ventura/Sonoma, "
+                 "BLE is unreliable on Sequoia, no confirmed reports on Tahoe, clones never work). "
+                 "For reliable Bluetooth buy a Broadcom BCM20702 dongle (0a5c:21e8, or ASUS USB-BT400 0b05:17cb)."),
+    "unknown": ("?", "Bluetooth chip not recognised (generic dongles usually do not work; Broadcom BCM20702 is the safe choice)."),
 }
 
 
@@ -599,7 +622,7 @@ def analyse(hw, notebook):
     res["range"] = cpu_range(gen)
     res["gpus"] = [gpu_info(d, gen, notebook) for d in hw["gpus"]]
     res["wifi"] = [(d, vendor_of(d["name"], d["vid"])) for d in hw["wifi"]]
-    res["bt"] = [(d, vendor_of(d["name"], d["vid"])) for d in hw["bt"]]
+    res["bt"] = [(d, bt_vendor(d)) for d in hw["bt"]]
     return res
 
 
@@ -792,8 +815,11 @@ def make_plan(hw, res, notebook, v):
         plan.append("AirportBrcmFixup")
     if "intel" in bt_vend:
         plan += ["IntelBT", "BrcmPatchRAM"]  # BrcmPatchRAM zip also carries BlueToolFixup (needed on macOS 12+)
-    if "broadcom" in bt_vend and "BrcmPatchRAM" not in plan:
+    if bt_vend & {"broadcom", "csr"} and "BrcmPatchRAM" not in plan:
         plan.append("BrcmPatchRAM")
+    if "csr" in bt_vend:
+        notes.append("CSR Bluetooth dongle: only BlueToolFixup was added (it is best-effort, see the Bluetooth line above). "
+                     "A Broadcom BCM20702 dongle is the reliable fix.")
     if notebook:
         plan += ["VoodooPS2", "BrightnessKeys", "ECEnabler"]
         tp = hw.get("touchpad", "ps2")
@@ -905,6 +931,14 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
     nv = cfg["NVRAM"]["Add"]["7C436110-AB2A-4BBB-A880-FE41995C9F82"]
     nv["boot-args"] = " ".join(args)
     nv["csr-active-config"] = b"\x00\x00\x00\x00"
+    if {x[1] for x in res["bt"]} & {"broadcom", "csr", "intel"}:
+        # BlueToolFixup 2.7.0+ needs these on every macOS version (non-Apple Bluetooth)
+        nv["bluetoothExternalDongleFailed"] = b"\x00"
+        nv["bluetoothInternalControllerInfo"] = bytes(14)
+        dl = cfg["NVRAM"].setdefault("Delete", {}).setdefault("7C436110-AB2A-4BBB-A880-FE41995C9F82", [])
+        for k in ("bluetoothExternalDongleFailed", "bluetoothInternalControllerInfo"):
+            if k not in dl:
+                dl.append(k)
     if any(g["family"] == "NVIDIA Kepler" and v > 12 for g in gp):
         notes.append("Kepler GPU on macOS %s: after installing, use OpenCore Legacy Patcher root patches; you may also need "
                      "boot-arg amfi=0x80 (as worked for the author on Tahoe) and csr-active-config 03 0A 00 00." % vlabel(v))
