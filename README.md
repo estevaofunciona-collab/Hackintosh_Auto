@@ -70,6 +70,10 @@ bash linux-termux/hackintosh_auto.sh
 ```
 Output: `Hackintosh_Auto_Output` in your phone's shared storage. Copy it to a USB drive with an OTG adapter. The recovery image is several hundred MB, so use a good connection and free space.
 
+## Boot screen and startup sound
+- **Boot text:** the program asks if you want the boot text. *Hide* (default) gives the clean Apple logo, without `-v`/`debug`/`keepsyms` and with OpenCore logging off, so it looks and starts faster. *Show* (`--show-boot-text`) keeps `-v`, which is best for the first install because it shows errors.
+- **Startup sound:** answer *Yes*, or run with `--chime`. It adds `AudioDxe.efi`, the sound file and the `UEFI > Audio` settings (onboard audio only, not HDMI). By default it uses OpenCore's own boot sound. For your own sound pass `--chime FILE.mp3` (44.1/48 kHz). **No Apple sound is included in this repository** - bring your own file.
+
 ## Removing the Hackintosh again (Windows)
 `windows/Remove_Hackintosh.bat` takes OpenCore out of the EFI partition if you want to go back to Windows only. It copies the EFI folder to `Desktop\Backup EFI` first, asks you to type `REMOVE` to confirm, and **never deletes macOS or any partition** (reclaim the disk yourself in Disk Management). If the EFI is shared with Windows, only OpenCore is removed. It is not part of the normal flow - run it only when you want out.
 

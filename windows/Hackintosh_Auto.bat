@@ -145,6 +145,8 @@ VERSION = "0.2"
 IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "")
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
+# build options chosen at run time: quiet boot (no -v text) and the startup chime
+OPTS = {"quiet": True, "chime": False}
 USE_COLOR = sys.stdout.isatty() or os.environ.get("HA_COLOR") == "1"
 if IS_WINDOWS:
     try:
@@ -899,7 +901,8 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
 
     # --- graphical picker + mouse + drivers
     drv_dir = os.path.join(efi, "OC", "Drivers")
-    drivers = [f for f in ("OpenRuntime.efi", "HfsPlus.efi", "OpenCanopy.efi") if os.path.isfile(os.path.join(drv_dir, f))]
+    wanted = ["OpenRuntime.efi", "HfsPlus.efi", "OpenCanopy.efi"] + (["AudioDxe.efi"] if OPTS["chime"] else [])
+    drivers = [f for f in wanted if os.path.isfile(os.path.join(drv_dir, f))]
     cfg["UEFI"]["Drivers"] = [{"Arguments": "", "Comment": "", "Enabled": True, "HideVerbose": False, "LoadEarly": False, "Path": f}
                               for f in drivers]
     cfg["Misc"]["Boot"]["PickerMode"] = "External"
@@ -931,7 +934,13 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
         bq["SyncRuntimePermissions"] = True
 
     # --- boot-args
-    args = ["-v", "keepsyms=1", "debug=0x100", "alcid=1"]
+    # quiet = clean Apple logo (no scrolling text); verbose is best for the first install because it shows errors
+    args = ["alcid=1"] if OPTS["quiet"] else ["-v", "keepsyms=1", "debug=0x100", "alcid=1"]
+    if OPTS["quiet"]:
+        cfg["Misc"]["Debug"]["Target"] = 0          # no OpenCore logging: slightly faster boot
+        cfg["Misc"]["Boot"]["Timeout"] = 3
+        notes.append("Quiet boot: no text while booting. If macOS does not start, add -v to boot-args (NVRAM > 7C436110-... > "
+                     "boot-args) to see the error, or build again and choose 'Show the boot text'.")
     gp = res["gpus"]
     if any(re.search(r"Navi|RDNA", g["family"]) for g in gp):
         args.append("agdpmod=pikera")
@@ -941,6 +950,17 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
     nv = cfg["NVRAM"]["Add"]["7C436110-AB2A-4BBB-A880-FE41995C9F82"]
     nv["boot-args"] = " ".join(args)
     nv["csr-active-config"] = b"\x00\x00\x00\x00"
+    if OPTS["chime"]:
+        au = cfg["UEFI"]["Audio"]
+        au["AudioSupport"] = True
+        au["PlayChime"] = "Enabled"
+        au["AudioCodec"] = 0
+        au["AudioOutMask"] = 1
+        au["SetupDelay"] = 0
+        au["AudioDevice"] = "PciRoot(0x0)/Pci(0x1b,0x0)" if (gen is not None and gen <= 4) else "PciRoot(0x0)/Pci(0x1f,0x3)"
+        nv["SystemAudioVolume"] = b"\x46"
+        notes.append("Startup chime: plays through the motherboard audio output (green jack at the back), not HDMI. AudioDevice was set to %s "
+                     "(standard for this CPU generation): if there is no sound, check it with gfxutil -f HDEF on a real Mac/Hackintosh." % au["AudioDevice"])
     if {x[1] for x in res["bt"]} & {"broadcom", "csr", "intel"}:
         # BlueToolFixup 2.7.0+ needs these on every macOS version (non-Apple Bluetooth)
         nv["bluetoothExternalDongleFailed"] = b"\x00"
@@ -999,6 +1019,9 @@ def main():
     ap.add_argument("--report", help="hardware_report.txt made by windows/read_hardware_pc.bat")
     ap.add_argument("--out", help="output folder")
     ap.add_argument("--skip-recovery", action="store_true", help="do not download the macOS recovery image")
+    ap.add_argument("--show-boot-text", action="store_true", help="keep the boot text (-v): best for the first install")
+    ap.add_argument("--chime", nargs="?", const="default", metavar="FILE",
+                    help="play a startup sound; optionally your own .mp3 (44.1/48 kHz). Nothing from Apple is bundled.")
     args = ap.parse_args()
 
     print()
@@ -1111,6 +1134,23 @@ def main():
     model = cands[mi] if mi < len(cands) else ask("Model (e.g. MacPro7,1): ", rec)
     choice = {"smbios": model, "macos": name}
 
+    # ---- boot screen + startup sound
+    if args.show_boot_text:
+        OPTS["quiet"] = False
+    else:
+        OPTS["quiet"] = choose("Boot screen?", ["Hide the boot text - clean Apple logo (looks faster)",
+                                                "Show the boot text (-v) - best for the first install, shows errors"], 1) == 0
+    if args.chime:
+        OPTS["chime"] = True
+        if args.chime != "default":
+            if os.path.isfile(args.chime):
+                OPTS["chime_file"] = args.chime
+            else:
+                warn("Sound file not found: %s - using the OpenCore default sound." % args.chime)
+    else:
+        OPTS["chime"] = choose("Startup sound (like the Mac chime)?",
+                               ["No", "Yes - needs onboard audio (motherboard audio jack); use --chime FILE.mp3 for your own sound"], 1) == 1
+
     plan, plan_notes = make_plan(hw, res, notebook, ver)
     print()
     info("Summary: %s | %s | %s | %s | dual boot: %s" % (("notebook" if notebook else "desktop"), vlabel(ver) + " " + name, model,
@@ -1134,7 +1174,7 @@ def main():
     efi = os.path.join(out, "EFI")
     drv = os.path.join(efi, "OC", "Drivers")
     for f in os.listdir(drv):
-        if f not in ("OpenRuntime.efi", "OpenCanopy.efi"):
+        if f not in ("OpenRuntime.efi", "OpenCanopy.efi") and not (OPTS["chime"] and f == "AudioDxe.efi"):
             os.remove(os.path.join(drv, f))
     tools = os.path.join(efi, "OC", "Tools")
     for f in os.listdir(tools):
@@ -1143,6 +1183,19 @@ def main():
     step("Downloading HfsPlus.efi ...")
     if not curl_file("https://github.com/acidanthera/OcBinaryData/raw/master/Drivers/HfsPlus.efi", os.path.join(drv, "HfsPlus.efi")):
         warn("   WARNING: HfsPlus.efi download failed")
+    if OPTS["chime"]:
+        adir = os.path.join(efi, "OC", "Resources", "Audio")
+        os.makedirs(adir, exist_ok=True)
+        dst = os.path.join(adir, "OCEFIAudio_VoiceOver_Boot.mp3")
+        if OPTS.get("chime_file"):
+            shutil.copy(OPTS["chime_file"], dst)
+            ok("Startup sound: using your file %s" % OPTS["chime_file"])
+        else:
+            step("Downloading the OpenCore boot sound ...")
+            if not curl_file("https://github.com/acidanthera/OcBinaryData/raw/master/Resources/Audio/OCEFIAudio_VoiceOver_Boot.mp3", dst):
+                warn("   WARNING: boot sound download failed (the chime will be silent)")
+        if not os.path.isfile(os.path.join(drv, "AudioDxe.efi")):
+            warn("   WARNING: AudioDxe.efi missing from the OpenCore package; no chime.")
     cfg_path = os.path.join(efi, "OC", "config.plist")
     shutil.copy(os.path.join(oc, "Docs", "Sample.plist"), cfg_path)
 
