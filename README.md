@@ -70,6 +70,9 @@ bash linux-termux/hackintosh_auto.sh
 ```
 Output: `Hackintosh_Auto_Output` in your phone's shared storage. Copy it to a USB drive with an OTG adapter. The recovery image is several hundred MB, so use a good connection and free space.
 
+## Removing the Hackintosh again (Windows)
+`windows/Remover_Hackintosh.bat` takes OpenCore out of the EFI partition if you want to go back to Windows only. It copies the EFI folder to `Desktop\Backup EFI` first, asks you to type `REMOVER` to confirm, and **never deletes macOS or any partition** (reclaim the disk yourself in Disk Management). If the EFI is shared with Windows, only OpenCore is removed. It is not part of the normal flow - run it only when you want out.
+
 ## After the EFI is built
 
 1. Read `BUILD_INFO.txt`: it lists what is left to do for your hardware.
