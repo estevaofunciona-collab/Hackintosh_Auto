@@ -50,6 +50,11 @@ The script detects the hardware of the computer you run it on, shows it, and ask
 
 Options: `--report FILE` (use a `hardware_report.txt` from another PC instead of detecting), `--out DIR`, `--skip-recovery` (do not download the macOS image now).
 
+### macOS (build the EFI from a Mac)
+1. Download `macos/Hackintosh_Auto.command`. First time: right-click it -> **Open** (macOS blocks files downloaded from the internet).
+2. It needs Python 3.8+ (`xcode-select --install` installs it). The Mac is not the target PC, so it asks about the PC you are building for - or run `Hackintosh_Auto.bat` on that PC first and pass `--report hardware_report.txt` (`bash` / Terminal: `python3 hackintosh_auto.py --report hardware_report.txt`).
+3. The finished `EFI` and `com.apple.recovery.boot` folders are in `Desktop/Hackintosh_Auto_Output`.
+
 ### Termux (Android)
 A phone cannot see your PC's hardware, so there are two ways to tell it:
 
@@ -87,6 +92,7 @@ In the BIOS, put OpenCore first in the boot order, and disable Fast Boot if the 
 
 - Test the Windows `.bat` on more machines (it is new and was written without a Windows test machine).
 - Bluetooth: CSR8510 (`0a12:0001`) "V5.0" dongles have no macOS 12+ driver. The tool adds only BlueToolFixup + the NVRAM keys (`bluetoothExternalDongleFailed`, `bluetoothInternalControllerInfo`) so you can try it, and tells you to buy a Broadcom BCM20702 dongle (`0a5c:21e8`, ASUS USB-BT400 `0b05:17cb`) for reliable Bluetooth.
+- Serial numbers: every run asks `macserial` for 30 serials and picks one at random, so nobody shares a serial. Check it at https://checkcoverage.apple.com (it should NOT be valid). If Apple says "this Mac was used to create many Apple Accounts", the serial is burned: create the account on a phone and sign in, or build again for a new serial. Nothing can promise Apple will accept a serial.
 - AMD CPU support, more Mac models, and a better Wi-Fi/Bluetooth chip database for notebooks.
 - Test reports from real hardware.
 

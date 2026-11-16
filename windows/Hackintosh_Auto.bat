@@ -115,7 +115,7 @@ if (Test-Path (Join-Path $outDir 'EFI')) { Start-Process explorer.exe -ArgumentL
 #PY_DATA
 #!/usr/bin/env python3
 """
-Hackintosh_Auto v0.2 (experimental) - Linux and Termux (Android)
+Hackintosh_Auto v0.2 (experimental) - Linux, macOS and Termux (Android)
 
 Interactive builder for an OpenCore EFI:
   1. asks desktop / notebook and dual boot
@@ -144,6 +144,7 @@ import zipfile
 VERSION = "0.2"
 IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "")
 IS_WINDOWS = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 USE_COLOR = sys.stdout.isatty() or os.environ.get("HA_COLOR") == "1"
 if IS_WINDOWS:
     try:
@@ -863,17 +864,26 @@ def kext_entries(kxdir, v):
     return entries
 
 
+def _tool(oc_dir, name):
+    """Path of an OpenCore Utilities binary for this OS (macserial / ocvalidate)."""
+    d = os.path.join(oc_dir, "Utilities", name)
+    return os.path.join(d, name + (".exe" if IS_WINDOWS else (".linux" if not IS_MAC else "")))
+
+
 def gen_serial(oc_dir, model):
-    """Returns (serial, mlb, used_macserial)."""
-    exe = os.path.join(oc_dir, "Utilities", "macserial", "macserial.exe" if IS_WINDOWS else "macserial.linux")
+    """Returns (serial, mlb, used_macserial). Asks macserial for 30 and picks one at random, so two people
+    running this tool never get the same serial (a shared serial is what makes Apple block account creation)."""
+    exe = _tool(oc_dir, "macserial")
     if os.path.isfile(exe) and platform.machine() in ("x86_64", "AMD64"):
         try:
             if not IS_WINDOWS:
                 os.chmod(exe, 0o755)
-            out = subprocess.run([exe, "--model", model, "--num", "1"], capture_output=True, text=True, timeout=30).stdout
-            m = re.search(r"^\s*(\S+)\s*\|\s*(\S+)", out, re.M)
-            if m:
-                return m.group(1), m.group(2), True
+            out = subprocess.run([exe, "--model", model, "--num", "30"], capture_output=True, text=True, timeout=30).stdout
+            pairs = re.findall(r"^\s*(\S+)\s*\|\s*(\S+)", out, re.M)
+            pairs = [x for x in pairs if len(x[0]) in (11, 12) and len(x[1]) in (13, 17)]
+            if pairs:
+                a, b = secrets.choice(pairs)
+                return a, b, True
         except Exception:
             pass
     al = string.ascii_uppercase + string.digits
@@ -971,6 +981,9 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
     cfg["PlatformInfo"]["UpdateDataHub"] = True
     cfg["PlatformInfo"]["UpdateNVRAM"] = True
     cfg["PlatformInfo"]["UpdateSMBIOS"] = True
+    notes.append("Serial %s: check it at https://checkcoverage.apple.com - it should say it is NOT valid (a serial that belongs to a real, "
+                 "sold Mac gets blocked fast). Nothing can promise Apple will accept it for a new Apple Account. If you see 'This Mac was used "
+                 "to create many Apple Accounts', create the account on a phone/web and just sign in, or run this tool again for a new serial." % serial)
     if not real:
         notes.append("Serial/MLB are random placeholders (macserial could not run here). Generate real ones with "
                      "macserial or GenSMBIOS before using iServices.")
@@ -989,13 +1002,15 @@ def main():
     args = ap.parse_args()
 
     print()
-    print("Hackintosh_Auto v%s (experimental) - %s" % (VERSION, "Termux" if IS_TERMUX else ("Windows" if IS_WINDOWS else "Linux")))
+    print("Hackintosh_Auto v%s (experimental) - %s" % (VERSION, "Termux" if IS_TERMUX else ("Windows" if IS_WINDOWS else ("macOS" if IS_MAC else "Linux"))))
     print("Compatibility data is approximate. Read https://dortania.github.io/OpenCore-Install-Guide/ before installing.")
 
     # ---- output folder
     if args.out:
         out = args.out
     elif IS_WINDOWS:
+        out = os.path.join(os.path.expanduser("~"), "Desktop", "Hackintosh_Auto_Output")
+    elif IS_MAC:
         out = os.path.join(os.path.expanduser("~"), "Desktop", "Hackintosh_Auto_Output")
     elif IS_TERMUX:
         home = os.path.expanduser("~")
@@ -1015,13 +1030,16 @@ def main():
     if args.report:
         hw = parse_report(args.report)
         info("Hardware read from %s" % args.report)
-    elif not IS_TERMUX and not IS_WINDOWS:
+    elif not IS_TERMUX and not IS_WINDOWS and not IS_MAC:
         hw = detect_linux()
         if shutil.which("lspci") is None or shutil.which("lscpu") is None:
             warn("lspci/lscpu not found, so some hardware cannot be detected. Install them with: sudo apt install pciutils usbutils util-linux")
         info("Hardware detected on this computer.")
     else:
         hw = None
+        if IS_MAC:
+            info("This Mac is not the computer you are building the EFI for, so I will ask about the target PC. "
+                 "(Tip: run Hackintosh_Auto.bat on that PC first and pass the report with --report.)")
         if IS_WINDOWS:
             warn("No hardware report given. Run Hackintosh_Auto.bat (it reads this PC for you) or answer the questions below.")
     if hw is not None:
@@ -1173,7 +1191,7 @@ def main():
     ok("config.plist written (drivers, kext order, SSDTs, SMBIOS, quirks, OpenCanopy + mouse).")
 
     # ---- ocvalidate (x86_64 Linux / Windows only)
-    oc_val = os.path.join(oc, "Utilities", "ocvalidate", "ocvalidate.exe" if IS_WINDOWS else "ocvalidate.linux")
+    oc_val = _tool(oc, "ocvalidate")
     if os.path.isfile(oc_val) and platform.machine() in ("x86_64", "AMD64"):
         try:
             if not IS_WINDOWS:
@@ -1227,6 +1245,11 @@ def main():
     print()
     ok("DONE. Folder: %s" % out)
     info("USB drive (FAT32, GUID): copy BOTH the EFI folder and the com.apple.recovery.boot folder to the ROOT of the drive.")
+    if IS_MAC:
+        try:
+            subprocess.run(["open", out])
+        except Exception:
+            pass
     print()
     info("Notes:")
     for t in todo:
