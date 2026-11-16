@@ -11,6 +11,7 @@ Scripts that help you prepare an **OpenCore EFI folder** and the **macOS recover
 | Asks desktop / notebook and dual boot | yes | yes | yes |
 | Gets your hardware | reads it itself (WMI), saves `hardware_report.txt` | detects it automatically (`lscpu`, `lspci`, `lsusb`) | `--report hardware_report.txt`, or asks you (CPU, board, GPU, Ethernet, audio, Wi-Fi, Bluetooth) |
 | Compatibility check (CPU generation, GPU, and Wi-Fi + Bluetooth on notebooks) | yes | yes | yes |
+| Bluetooth by USB ID (VID:PID): Broadcom BCM20702, Intel, CSR (`0a12:0001`, best-effort), Realtek/Atheros/MediaTek (not supported) | yes | yes | yes (type the chip vendor) |
 | Lists the compatible macOS versions and lets you pick the **macOS** and the **Mac model (SMBIOS)** | yes | yes | yes |
 | Downloads the latest **OpenCore** | yes | yes | yes |
 | Picks and downloads the **kexts** for your hardware and writes them to `config.plist` in load order | yes | yes | yes |
@@ -85,6 +86,7 @@ In the BIOS, put OpenCore first in the boot order, and disable Fast Boot if the 
 ## Roadmap
 
 - Test the Windows `.bat` on more machines (it is new and was written without a Windows test machine).
+- Bluetooth: CSR8510 (`0a12:0001`) "V5.0" dongles have no macOS 12+ driver. The tool adds only BlueToolFixup + the NVRAM keys (`bluetoothExternalDongleFailed`, `bluetoothInternalControllerInfo`) so you can try it, and tells you to buy a Broadcom BCM20702 dongle (`0a5c:21e8`, ASUS USB-BT400 `0b05:17cb`) for reliable Bluetooth.
 - AMD CPU support, more Mac models, and a better Wi-Fi/Bluetooth chip database for notebooks.
 - Test reports from real hardware.
 
