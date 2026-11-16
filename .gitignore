@@ -9,3 +9,5 @@ macrecovery/
 config*.plist
 hardware_report.txt
 _temp/
+__pycache__/
+*.pyc
