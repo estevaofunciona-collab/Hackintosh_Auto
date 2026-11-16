@@ -48,6 +48,23 @@ $bt = Get-PnpDevice -PresentOnly | Where-Object { ($_.Class -eq 'Bluetooth' -or 
 $bt | ForEach-Object { Add-Line ('Name: ' + $_.FriendlyName); Add-Line ('  ID: ' + $_.InstanceId) }
 Section 'DRIVES'
 Get-PhysicalDisk | ForEach-Object { Add-Line ($_.FriendlyName + '  ' + [math]::Round($_.Size/1GB) + ' GB  ' + $_.MediaType + '  ' + $_.BusType) }
+Section 'INPUT DEVICES'
+function Get-Bus($id, $name) {
+  if ($id -match '^HID\\VID_' -or $id -match '^HID\\\{' -or $id -match '^USB\\') { return 'USB' }
+  if ($id -match '^HID\\') { return 'I2C' }
+  if ($id -match 'PNP0F|PNP0303|PS2' -or $name -match 'PS/2') { return 'PS/2' }
+  return 'other'
+}
+$tp = @()
+Get-CimInstance Win32_Keyboard | ForEach-Object { Add-Line ('Keyboard: ' + $_.Name + '  [' + (Get-Bus $_.PNPDeviceID $_.Name) + ']') }
+Get-CimInstance Win32_PointingDevice | ForEach-Object { $b = Get-Bus $_.PNPDeviceID $_.Name; $tp += $b; Add-Line ('Pointing: ' + $_.Name + '  [' + $b + ']') }
+$t = 'unknown'
+if ($tp -contains 'I2C') { $t = 'i2c' } elseif ($tp -contains 'PS/2') { $t = 'ps2' } elseif ($tp -contains 'USB') { $t = 'usb' }
+Add-Line ('Touchpad: ' + $t)
+Section 'USB CONTROLLERS'
+Get-PnpDevice -PresentOnly -Class USB | Where-Object { $_.FriendlyName -match 'Host Controller|xHCI|EHCI|OHCI|UHCI' } | ForEach-Object { Add-Line ($_.FriendlyName + '  ' + $_.InstanceId) }
+Section 'OTHER DEVICES'
+foreach ($cl in 'Camera','Biometric','SDHost','SmartCardReader') { Get-PnpDevice -PresentOnly -Class $cl | ForEach-Object { Add-Line ($cl + ': ' + $_.FriendlyName) } }
 $rep = Join-Path $work 'hardware_report.txt'
 $L | Out-File -FilePath $rep -Encoding UTF8
 Copy-Item -Force $rep (Join-Path $Desktop 'hardware_report.txt')
@@ -231,7 +248,8 @@ IG_PLATFORM = {2: (0x00030010, 0x00010000), 3: (0x0166000A, 0x01660003), 4: (0x0
 # hardware model
 # ----------------------------------------------------------------------------------------------
 def new_hw():
-    return {"cpu": "", "board": "", "gpus": [], "eth": [], "wifi": [], "bt": [], "audio": [], "nvme": None}
+    return {"cpu": "", "board": "", "gpus": [], "eth": [], "wifi": [], "bt": [], "audio": [], "nvme": None,
+            "touchpad": None, "inputs": [], "usb_ctrl": [], "other": []}
 
 
 def dev(name, vid="", did=""):
@@ -282,6 +300,36 @@ def run(cmd):
         return ""
 
 
+def detect_inputs_linux(hw):
+    """Keyboards / pointing devices and how they are connected (from /proc/bus/input/devices)."""
+    try:
+        txt = open("/proc/bus/input/devices", errors="replace").read()
+    except Exception:
+        return
+    tps = []
+    for blk in txt.strip().split("\n\n"):
+        name = re.search(r'N: Name="(.*)"', blk)
+        sysfs = re.search(r"S: Sysfs=(.*)", blk)
+        hand = re.search(r"H: Handlers=(.*)", blk)
+        if not (name and hand):
+            continue
+        name, sysfs, hand = name.group(1), (sysfs.group(1) if sysfs else ""), hand.group(1)
+        if "i2c" in sysfs.lower():
+            bus = "I2C"
+        elif "serio" in sysfs.lower() or "isa0060" in blk.lower():
+            bus = "PS/2"
+        elif "usb" in sysfs.lower():
+            bus = "USB"
+        else:
+            bus = "other"
+        if "kbd" in hand and "mouse" not in hand and re.search(r"keyboard", name, re.I):
+            hw["inputs"].append("Keyboard: %s [%s]" % (name, bus))
+        elif re.search(r"mouse|event", hand) and re.search(r"touchpad|trackpad|mouse|synaptics|elan|trackpoint", name, re.I):
+            hw["inputs"].append("Pointing: %s [%s]" % (name, bus))
+            tps.append(bus)
+    hw["touchpad"] = ("i2c" if "I2C" in tps else "ps2" if "PS/2" in tps else "usb" if "USB" in tps else None)
+
+
 def detect_linux():
     hw = new_hw()
     for line in run(["lscpu"]).splitlines():
@@ -310,6 +358,9 @@ def detect_linux():
             hw["audio"].append(d)
         elif "Non-Volatile" in cls:
             hw["nvme"] = True
+        elif "USB controller" in cls:
+            hw["usb_ctrl"].append(d["name"])
+    detect_inputs_linux(hw)
     for line in run(["lsusb"]).splitlines():
         m = re.search(r"ID ([0-9a-f]{4}):([0-9a-f]{4})\s*(.*)", line)
         if m and re.search(r"bluetooth", m.group(3), re.I):
@@ -360,6 +411,16 @@ def parse_report(path):
                 if p: cur["did"] = p.group(1).lower()
         elif sec == "DRIVES" and re.search(r"NVMe", s):
             hw["nvme"] = True
+        elif sec == "INPUT DEVICES":
+            if s.startswith("Touchpad:"):
+                v = s[9:].strip().lower()
+                hw["touchpad"] = v if v in ("i2c", "ps2", "usb") else None
+            elif s.startswith(("Keyboard:", "Pointing:")):
+                hw["inputs"].append(s)
+        elif sec == "USB CONTROLLERS" and s:
+            hw["usb_ctrl"].append(re.sub(r"\s+(USB|PCI)\\\S+$", "", s))
+        elif sec == "OTHER DEVICES" and s:
+            hw["other"].append(s)
     if hw["nvme"] is None:
         hw["nvme"] = False
     return hw
@@ -394,6 +455,14 @@ def show_hw(hw):
         print("  %-11s %s" % (label + ":", "; ".join(d["name"] + (" [%s:%s]" % (d["vid"], d["did"]) if d["vid"] else "")
                                                        for d in items) if items else "none / not detected"))
     print("  NVMe SSD:   %s" % ("yes" if hw["nvme"] else "no / unknown"))
+    if hw.get("inputs"):
+        print("  Inputs:")
+        for t in hw["inputs"]:
+            print("     " + t)
+    if hw.get("usb_ctrl"):
+        print("  USB ctrl:   %s" % "; ".join(hw["usb_ctrl"]))
+    if hw.get("other"):
+        print("  Other:      %s" % "; ".join(hw["other"]))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -930,8 +999,11 @@ def main():
     if not hw["cpu"]:
         hw["cpu"] = ask("  Processor model (needed): ")
     if notebook:
-        tp = choose("Touchpad type? (if unsure choose PS/2)", ["PS/2 / Synaptics / ELAN (most common)", "I2C (precision touchpad)"], 1)
-        hw["touchpad"] = "i2c" if tp == 1 else "ps2"
+        if hw.get("touchpad") in ("i2c", "ps2"):
+            info("Touchpad detected as %s." % ("I2C" if hw["touchpad"] == "i2c" else "PS/2"))
+        else:
+            tp = choose("Touchpad type? (if unsure choose PS/2)", ["PS/2 / Synaptics / ELAN (most common)", "I2C (precision touchpad)"], 1)
+            hw["touchpad"] = "i2c" if tp == 1 else "ps2"
 
     # ---- analysis
     res = analyse(hw, notebook)
@@ -1098,7 +1170,14 @@ def main():
 
     # ---- report
     todo = plan_notes + cfg_notes + [
-        "Map your USB ports (USBToolBox tool, generates UTBMap.kext) - the number of ports on macOS is limited.",
+        "Map your USB ports (USBToolBox tool, generates UTBMap.kext) - the number of ports on macOS is limited." +
+        ((" USB controllers found: " + "; ".join(hw["usb_ctrl"]) + ".") if hw.get("usb_ctrl") else ""),
+    ] + [
+        "%s -> %s" % (o, "fingerprint readers do not work on macOS." if o.lower().startswith("biometric") else
+                      "card readers usually do not work on macOS." if o.lower().startswith(("sdhost", "smartcard")) else
+                      "a USB (UVC) webcam usually works; an internal one depends on the model.")
+        for o in hw.get("other", [])
+    ] + [
         "Audio uses layout alcid=1; if there is no sound try other layout ids for your codec (AppleALC wiki).",
         "Check BIOS settings: disable Secure Boot, CSM/Legacy; enable UEFI; XHCI hand-off; disable CFG-Lock if possible.",
     ]

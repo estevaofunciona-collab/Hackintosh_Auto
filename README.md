@@ -32,7 +32,7 @@ The output folder contains `EFI/`, `com.apple.recovery.boot/` and `BUILD_INFO.tx
 
 ### Windows
 1. Download `windows/Hackintosh_Auto.bat` (Windows 10 or 11).
-2. Double-click it. It reads your hardware (read-only), then asks: desktop or notebook, dual boot, which macOS and which Mac model. Plug your Bluetooth dongle in first so it is detected.
+2. Double-click it. It reads your hardware (read-only), then asks: desktop or notebook, dual boot, which macOS and which Mac model. Plug your Bluetooth dongle in first so it is detected. It also detects keyboard/mouse/touchpad (PS/2, I2C or USB), the USB controllers, and other devices such as webcam, fingerprint reader and card reader, and tells you which ones work on macOS.
 3. If Python 3 is not installed it downloads a small portable copy (about 10 MB) by itself.
 4. The result is created on your Desktop in `Hackintosh_Auto_Output` (`EFI` + `com.apple.recovery.boot` + `BUILD_INFO.txt`). A copy of the hardware report is saved as `hardware_report.txt` on your Desktop.
 
