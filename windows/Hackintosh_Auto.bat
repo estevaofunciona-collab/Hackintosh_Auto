@@ -955,10 +955,12 @@ def write_config(cfg_path, oc_dir, efi, choice, hw, res, notebook, dual, v, plan
         au["AudioSupport"] = True
         au["PlayChime"] = "Enabled"
         au["AudioCodec"] = 0
-        au["AudioOutMask"] = 1
+        au["AudioOutMask"] = -1  # all outputs of the codec (1 = first output only, often silent)
+        au["ResetTrafficClass"] = True
+        au["MaximumGain"] = 0
         au["SetupDelay"] = 0
         au["AudioDevice"] = "PciRoot(0x0)/Pci(0x1b,0x0)" if (gen is not None and gen <= 4) else "PciRoot(0x0)/Pci(0x1f,0x3)"
-        nv["SystemAudioVolume"] = b"\x46"
+        nv["SystemAudioVolume"] = b"\x64"
         notes.append("Startup chime: plays through the motherboard audio output (green jack at the back), not HDMI. AudioDevice was set to %s "
                      "(standard for this CPU generation): if there is no sound, check it with gfxutil -f HDEF on a real Mac/Hackintosh." % au["AudioDevice"])
     if {x[1] for x in res["bt"]} & {"broadcom", "csr", "intel"}:
